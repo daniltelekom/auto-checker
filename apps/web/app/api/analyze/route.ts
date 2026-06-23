@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-const OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct"
+import type { AiProvider } from "@/types"
 
 type AnalyzeRequestBody = {
   text?: string
+  provider?: AiProvider
 }
 
 type ChatCompletionResponse = {
@@ -24,6 +24,16 @@ type AnalysisResult = {
   verdict: string
 }
 
+type ProviderConfig = {
+  url: string
+  model: string
+  apiKey: string
+  headers: Record<string, string>
+}
+
+const SYSTEM_PROMPT =
+  "Ты эксперт-автоподборщик с 15-летним стажем. Анализируй объявления о продаже б/у автомобилей. Отвечай СТРОГО в формате JSON без markdown, без пояснений, только валидный JSON."
+
 function buildUserPrompt(text: string): string {
   return `Проанализируй это объявление и верни JSON строго такого формата:
 {
@@ -38,7 +48,59 @@ function buildUserPrompt(text: string): string {
 Объявление: ${text}`
 }
 
-function getApiErrorMessage(status: number, errorText: string): string {
+function resolveProvider(provider?: AiProvider): AiProvider {
+  return provider === "groq" ? "groq" : "openrouter"
+}
+
+function getGroqConfig(): ProviderConfig | { error: string } {
+  const apiKey = process.env.GROQ_API_KEY?.trim()
+
+  if (!apiKey) {
+    console.error("[analyze][groq] GROQ_API_KEY is not set")
+    return {
+      error:
+        "Сервер не настроен для Groq: отсутствует GROQ_API_KEY в apps/web/.env.local",
+    }
+  }
+
+  return {
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: "llama-3.3-70b-versatile",
+    apiKey,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+  }
+}
+
+function getOpenRouterConfig(): ProviderConfig | { error: string } {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim()
+
+  if (!apiKey) {
+    console.error("[analyze][openrouter] OPENROUTER_API_KEY is not set")
+    return {
+      error:
+        "Сервер не настроен для OpenRouter: отсутствует OPENROUTER_API_KEY в apps/web/.env.local",
+    }
+  }
+
+  return {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    model:
+      process.env.OPENROUTER_MODEL?.trim() ||
+      "meta-llama/llama-3.3-70b-instruct:free",
+    apiKey,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://vercel.app",
+      "X-Title": "AutoChecker",
+    },
+  }
+}
+
+function getGroqErrorMessage(status: number, errorText: string): string {
   try {
     const parsed = JSON.parse(errorText) as {
       error?: { message?: string }
@@ -46,11 +108,40 @@ function getApiErrorMessage(status: number, errorText: string): string {
     const apiMessage = parsed.error?.message
 
     if (status === 401 || status === 403) {
-      return "Неверный или просроченный OPENROUTER_API_KEY. Создайте новый ключ на https://openrouter.ai/keys и обновите apps/web/.env.local"
+      return "Неверный или просроченный GROQ_API_KEY. Создайте новый ключ на https://console.groq.com/keys"
+    }
+
+    if (status === 429) {
+      return "Превышен лимит запросов Groq API. Попробуйте через минуту."
+    }
+
+    if (apiMessage) {
+      return `Ошибка Groq API: ${apiMessage}`
+    }
+  } catch {
+    // ignore JSON parse errors
+  }
+
+  return "Ошибка при обращении к Groq API"
+}
+
+function getOpenRouterErrorMessage(status: number, errorText: string): string {
+  try {
+    const parsed = JSON.parse(errorText) as {
+      error?: { message?: string }
+    }
+    const apiMessage = parsed.error?.message
+
+    if (status === 401 || status === 403) {
+      return "Неверный или просроченный OPENROUTER_API_KEY. Создайте новый ключ на https://openrouter.ai/keys"
     }
 
     if (status === 429) {
       return "Превышен лимит запросов OpenRouter API. Попробуйте через минуту."
+    }
+
+    if (status === 502 && apiMessage?.includes("Invalid URL")) {
+      return "OpenRouter не смог подключиться к модели. Попробуйте позже или укажите другую модель в OPENROUTER_MODEL."
     }
 
     if (apiMessage) {
@@ -81,6 +172,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as AnalyzeRequestBody
     const text = body.text?.trim()
+    const provider = resolveProvider(body.provider)
 
     if (!text) {
       return NextResponse.json(
@@ -89,30 +181,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const apiKey = process.env.OPENROUTER_API_KEY?.trim()
-
-    if (!apiKey) {
-      console.error("[analyze] OPENROUTER_API_KEY is not set")
+    if (body.provider && body.provider !== "groq" && body.provider !== "openrouter") {
       return NextResponse.json(
-        { error: "Сервер не настроен: отсутствует OPENROUTER_API_KEY" },
-        { status: 500 }
+        { error: "Неизвестный провайдер. Используйте groq или openrouter" },
+        { status: 400 }
       )
     }
 
-    const apiResponse = await fetch(OPENROUTER_API_URL, {
+    console.log(`[analyze] Using provider: ${provider}`)
+
+    const config =
+      provider === "groq" ? getGroqConfig() : getOpenRouterConfig()
+
+    if ("error" in config) {
+      return NextResponse.json({ error: config.error }, { status: 500 })
+    }
+
+    const apiResponse = await fetch(config.url, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-      },
+      headers: config.headers,
       body: JSON.stringify({
-        model: OPENROUTER_MODEL,
+        model: config.model,
         messages: [
           {
             role: "system",
-            content:
-              "Ты эксперт-автоподборщик с 15-летним стажем. Анализируй объявления о продаже б/у автомобилей. Отвечай СТРОГО в формате JSON без markdown, без пояснений, только валидный JSON.",
+            content: SYSTEM_PROMPT,
           },
           {
             role: "user",
@@ -126,12 +219,17 @@ export async function POST(request: NextRequest) {
 
     if (!apiResponse.ok) {
       const errorText = await apiResponse.text()
-      const errorMessage = getApiErrorMessage(apiResponse.status, errorText)
+      const errorMessage =
+        provider === "groq"
+          ? getGroqErrorMessage(apiResponse.status, errorText)
+          : getOpenRouterErrorMessage(apiResponse.status, errorText)
+
       console.error(
-        "[analyze] OpenRouter API error:",
+        `[analyze][${provider}] API error:`,
         apiResponse.status,
         errorText
       )
+
       return NextResponse.json({ error: errorMessage }, { status: 500 })
     }
 
@@ -139,9 +237,14 @@ export async function POST(request: NextRequest) {
     const content = data.choices?.[0]?.message?.content
 
     if (!content) {
-      console.error("[analyze] Empty content in OpenRouter response:", data)
+      console.error(`[analyze][${provider}] Empty content in response:`, data)
       return NextResponse.json(
-        { error: "Пустой ответ от OpenRouter API" },
+        {
+          error:
+            provider === "groq"
+              ? "Пустой ответ от Groq API"
+              : "Пустой ответ от OpenRouter API",
+        },
         { status: 500 }
       )
     }

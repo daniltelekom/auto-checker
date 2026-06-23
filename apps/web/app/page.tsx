@@ -4,14 +4,28 @@ import { useState, type KeyboardEvent } from "react"
 import { Loader2 } from "lucide-react"
 
 import { Button } from "@workspace/ui/components/button"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import { Textarea } from "@workspace/ui/components/textarea"
 
 import { AnalysisResult as AnalysisResultView } from "@/components/AnalysisResult"
 import { normalizeAnalysisResult } from "@/lib/analysis"
-import type { AnalysisData, AnalyzeApiError, AnalysisResult } from "@/types"
+import type {
+  AiProvider,
+  AnalysisData,
+  AnalyzeApiError,
+  AnalysisResult,
+} from "@/types"
 
 export default function Page() {
   const [text, setText] = useState("")
+  const [selectedProvider, setSelectedProvider] =
+    useState<AiProvider>("openrouter")
   const [isLoading, setIsLoading] = useState(false)
   const [result, setResult] = useState<AnalysisData | null>(null)
 
@@ -31,7 +45,10 @@ export default function Page() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ text: trimmedText }),
+        body: JSON.stringify({
+          text: trimmedText,
+          provider: selectedProvider,
+        }),
       })
 
       const data = (await response.json()) as AnalysisResult | AnalyzeApiError
@@ -72,6 +89,32 @@ export default function Page() {
         </header>
 
         <section className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="ai-provider"
+              className="text-sm font-medium"
+            >
+              AI-провайдер
+            </label>
+            <Select
+              value={selectedProvider}
+              onValueChange={(value) =>
+                setSelectedProvider(value as AiProvider)
+              }
+              disabled={isLoading}
+            >
+              <SelectTrigger id="ai-provider" className="w-full">
+                <SelectValue placeholder="Выберите провайдера" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openrouter">
+                  OpenRouter (бесплатно)
+                </SelectItem>
+                <SelectItem value="groq">Groq (быстро)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <Textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
