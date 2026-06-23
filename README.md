@@ -1,21 +1,39 @@
-# shadcn/ui monorepo template
+# autochecker
 
-This is a Next.js monorepo template with shadcn/ui.
+Next.js монорепозиторий с shadcn/ui (Radix, Vega).
 
-## Adding components
+## Структура
 
-To add components to your app, run the following command at the root of your `web` app:
-
-```bash
-pnpm dlx shadcn@latest add button -c apps/web
+```
+auto-checker/
+├── apps/web/              # Next.js приложение
+├── packages/ui/           # UI-компоненты (shadcn)
+├── packages/eslint-config/
+└── packages/typescript-config/
 ```
 
-This will place the ui components in the `packages/ui/src/components` directory.
+## Запуск
 
-## Using components
+```bash
+npm install
+npm run dev
+```
 
-To use the components in your app, import them from the `ui` package.
+## Добавление компонентов shadcn
+
+Команды запускайте из папки приложения:
+
+```bash
+cd apps/web
+npx shadcn@latest add button textarea card
+```
+
+Компоненты создаются в `packages/ui/src/components/`.
+
+## Использование компонентов
 
 ```tsx
-import { Button } from "@workspace/ui/components/button";
+import { Button } from "@workspace/ui/components/button"
+import { Card } from "@workspace/ui/components/card"
+import { Textarea } from "@workspace/ui/components/textarea"
 ```
