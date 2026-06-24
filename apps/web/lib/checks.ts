@@ -12,6 +12,10 @@ function getWindowStart(): string {
 }
 
 export async function getSessionCheckCount(sessionId: string): Promise<number> {
+  if (!supabase) {
+    return 0
+  }
+
   const { count, error } = await supabase
     .from("checks")
     .select("*", { count: "exact", head: true })
@@ -31,6 +35,10 @@ export function getRemainingChecks(usedCount: number): number {
 }
 
 export async function saveCheck(sessionId: string): Promise<boolean> {
+  if (!supabase) {
+    return false
+  }
+
   const { error } = await supabase.from("checks").insert({ session_id: sessionId })
 
   if (error) {

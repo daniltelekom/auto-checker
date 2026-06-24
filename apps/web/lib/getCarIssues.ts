@@ -1,4 +1,4 @@
-import { supabase } from "./supabase"
+import { isSupabaseConfigured, supabase } from "./supabase"
 
 export interface CarIssue {
   id: number
@@ -20,23 +20,31 @@ export async function getCarIssues(
   model: string,
   year: number
 ): Promise<CarIssue[]> {
-  if (!make || !model || !year) {
+  if (!isSupabaseConfigured() || !supabase || !make || !model || !year) {
+    console.log(
+      "Supabase not configured or missing data, returning empty issues"
+    )
     return []
   }
 
-  const { data, error } = await supabase
-    .from("car_issues")
-    .select("*")
-    .ilike("make", make)
-    .ilike("model", model)
-    .lte("year_from", year)
-    .gte("year_to", year)
-    .order("severity", { ascending: false })
+  try {
+    const { data, error } = await supabase
+      .from("car_issues")
+      .select("*")
+      .ilike("make", make)
+      .ilike("model", model)
+      .lte("year_from", year)
+      .gte("year_to", year)
+      .order("severity", { ascending: false })
 
-  if (error) {
-    console.error("Supabase error:", error)
+    if (error) {
+      console.error("Supabase error:", error)
+      return []
+    }
+
+    return data || []
+  } catch (error) {
+    console.error("Unexpected error in getCarIssues:", error)
     return []
   }
-
-  return data || []
 }
