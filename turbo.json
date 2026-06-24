@@ -1,7 +1,11 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "tui",
-  "globalPassThroughEnv": ["OPENROUTER_API_KEY", "GROQ_API_KEY"],
+  "globalPassThroughEnv": [
+    "YANDEX_API_KEY",
+    "YANDEX_FOLDER_ID",
+    "YANDEX_CLOUD_ID"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

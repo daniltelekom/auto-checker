@@ -1,7 +1,5 @@
 export type VerdictType = "positive" | "caution" | "negative"
 
-export type AiProvider = "openrouter" | "groq"
-
 export interface AnalysisResult {
   price_analysis: string
   common_issues: string[]
