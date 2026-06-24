@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 
+import { getCarIssues, type CarIssue } from "@/lib/getCarIssues"
+import { parseListing, type ParsedListing } from "@/lib/parseListing"
+
 type AnalyzeRequestBody = {
   text?: string
 }
@@ -27,13 +30,92 @@ const YANDEX_API_URL =
   "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
 
 const SYSTEM_PROMPT =
-  "Ты эксперт-автоподборщик. Анализируй объявления о продаже б/у автомобилей. Отвечай СТРОГО в формате JSON без markdown."
+  "Ты эксперт-автоподборщик. Тебе даны структурированные данные объявления. Отвечай СТРОГО в формате JSON без markdown."
 
-function buildUserPrompt(text: string): string {
-  return `Проанализируй объявление и верни JSON:
-{price_analysis, common_issues[], inspection_checklist[], questions_to_seller[], red_flags[], verdict}
+function formatField(value: string | number | null): string {
+  if (value === null) {
+    return "не указано"
+  }
 
-Объявление: ${text}`
+  return String(value)
+}
+
+function buildIssuesBlock(issues: CarIssue[]): string {
+  if (issues.length > 0) {
+    return `Известные проблемы этой модели из базы данных (учитывай их в анализе):
+${issues
+  .map(
+    (issue) =>
+      `- [${issue.severity}] ${issue.issue} (ремонт: ${issue.repair_cost_min}-${issue.repair_cost_max} руб., обычно после ${issue.mileage_threshold} км). ${issue.description}`
+  )
+  .join("\n")}
+
+`
+  }
+
+  return `В базе данных нет информации об этой модели. Дай общий анализ на основе своего опыта.
+
+`
+}
+
+function getMileageRedFlags(
+  mileage: number | null,
+  issues: CarIssue[]
+): string[] {
+  if (mileage === null) {
+    return []
+  }
+
+  return issues
+    .filter(
+      (issue) =>
+        (issue.severity === "critical" || issue.severity === "high") &&
+        mileage >= issue.mileage_threshold
+    )
+    .map(
+      (issue) =>
+        `Пробег ${mileage.toLocaleString("ru-RU")} км достиг порога для проблемы «${issue.issue}» [${issue.severity}]: обычно проявляется после ${issue.mileage_threshold.toLocaleString("ru-RU")} км`
+    )
+}
+
+function buildUserPrompt(parsed: ParsedListing, issues: CarIssue[]): string {
+  const carTitle = [parsed.make, parsed.model].filter(Boolean).join(" ") || "не определено"
+  const mileage =
+    parsed.mileage !== null
+      ? `${parsed.mileage.toLocaleString("ru-RU")} км`
+      : "не указан"
+  const price =
+    parsed.price !== null
+      ? `${parsed.price.toLocaleString("ru-RU")} руб`
+      : "не указана"
+
+  const issuesBlock = buildIssuesBlock(issues)
+
+  return `Автомобиль: ${carTitle}, ${formatField(parsed.year)} год
+Пробег: ${mileage}
+Цена: ${price}
+Двигатель: ${formatField(parsed.engine)}
+КПП: ${formatField(parsed.transmission)}
+Владельцев: ${formatField(parsed.owners)}
+
+Описание продавца: ${parsed.description}
+
+${issuesBlock}Выполни анализ и верни JSON строго такого формата:
+{
+  "price_analysis": "...",
+  "common_issues": ["..."],
+  "inspection_checklist": ["..."],
+  "questions_to_seller": ["..."],
+  "red_flags": ["..."],
+  "verdict": "..."
+}
+
+Инструкции:
+- Сравни цену с типичной рыночной для этой модели/года/пробега
+- Укажи болячки ИМЕННО этой модели и года
+- Учти пробег при прогнозе поломок
+- Если пробег подозрительно низкий для года — отметь как красный флаг
+- Если цена ниже рынка на 20%+ — отметь как красный флаг`
 }
 
 function getYandexConfig():
@@ -134,7 +216,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: config.error }, { status: 500 })
     }
 
-    console.log("[analyze] Using provider: yandexgpt-lite")
+    const parsedData = parseListing(text)
+    const { make, model, year } = parsedData
+
+    const issues =
+      make && model && year !== null
+        ? await getCarIssues(make, model, year)
+        : []
+
+    console.log("[analyze] Using provider: yandexgpt-lite", {
+      make,
+      model,
+      year,
+      issues: issues.length,
+    })
 
     const apiResponse = await fetch(YANDEX_API_URL, {
       method: "POST",
@@ -157,7 +252,7 @@ export async function POST(request: NextRequest) {
           },
           {
             role: "user",
-            text: buildUserPrompt(text),
+            text: buildUserPrompt(parsedData, issues),
           },
         ],
       }),
@@ -188,8 +283,17 @@ export async function POST(request: NextRequest) {
     }
 
     const result = parseAnalysisJson(content)
+    const mileageRedFlags = getMileageRedFlags(parsedData.mileage, issues)
+    const red_flags = [
+      ...new Set([...(result.red_flags ?? []), ...mileageRedFlags]),
+    ]
 
-    return NextResponse.json(result)
+    return NextResponse.json({
+      ...result,
+      red_flags,
+      parsed_data: parsedData,
+      known_issues: issues,
+    })
   } catch (error) {
     console.error("[analyze] Unexpected error:", error)
     return NextResponse.json(

@@ -24,6 +24,8 @@ export function normalizeAnalysisResult(data: AnalysisResult): AnalysisData {
     questions_to_seller: data.questions_to_seller ?? [],
     red_flags: data.red_flags ?? [],
     verdict: data.verdict,
+    parsed_data: data.parsed_data,
+    known_issues: data.known_issues ?? [],
     verdict_type: inferVerdictType(data.verdict),
   }
 }
