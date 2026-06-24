@@ -1,19 +1,26 @@
+"use client"
+
+import { useState } from "react"
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
+import { Button } from "@workspace/ui/components/button"
 import { cn } from "@workspace/ui/lib/utils"
 import {
   Car,
   Cog,
+  Download,
+  Loader2,
   Shield,
   Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react"
 
+import { downloadReportPdf } from "@/lib/generateReportPdf"
 import type { AnalysisData, CarIssue, VerdictType } from "@/types"
 
 type AnalysisResultProps = {
@@ -271,8 +278,44 @@ function KnownIssuesCard({ issues }: { issues: AnalysisData["known_issues"] }) {
 }
 
 export function AnalysisResult({ data }: AnalysisResultProps) {
+  const [isDownloading, setIsDownloading] = useState(false)
+
+  async function handleDownloadPdf() {
+    setIsDownloading(true)
+
+    try {
+      await downloadReportPdf(data)
+    } catch (error) {
+      console.error("[AnalysisResult] PDF generation failed:", error)
+      alert("Не удалось сформировать PDF-отчёт. Попробуйте ещё раз.")
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 grid gap-4 duration-500 sm:grid-cols-2">
+      <div className="flex sm:col-span-2">
+        <Button
+          variant="outline"
+          size="lg"
+          onClick={() => void handleDownloadPdf()}
+          disabled={isDownloading}
+        >
+          {isDownloading ? (
+            <>
+              <Loader2 className="animate-spin" />
+              Формирую PDF...
+            </>
+          ) : (
+            <>
+              <Download />
+              Скачать PDF отчёт
+            </>
+          )}
+        </Button>
+      </div>
+
       <ParsedDataCard parsed={data.parsed_data} />
       <KnownIssuesCard issues={data.known_issues} />
 

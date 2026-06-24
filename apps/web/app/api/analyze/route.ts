@@ -1,10 +1,19 @@
+import { randomUUID } from "crypto"
+
 import { NextRequest, NextResponse } from "next/server"
 
+import {
+  FREE_CHECK_LIMIT,
+  getRemainingChecks,
+  getSessionCheckCount,
+  saveCheck,
+} from "@/lib/checks"
 import { getCarIssues, type CarIssue } from "@/lib/getCarIssues"
 import { parseListing, type ParsedListing } from "@/lib/parseListing"
 
 type AnalyzeRequestBody = {
   text?: string
+  session_id?: string
 }
 
 type YandexCompletionResponse = {
@@ -202,11 +211,26 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as AnalyzeRequestBody
     const text = body.text?.trim()
+    const sessionId = body.session_id?.trim() || randomUUID()
 
     if (!text) {
       return NextResponse.json(
         { error: "Поле text обязательно и не может быть пустым" },
         { status: 400 }
+      )
+    }
+
+    const usedChecks = await getSessionCheckCount(sessionId)
+
+    if (usedChecks >= FREE_CHECK_LIMIT) {
+      return NextResponse.json(
+        {
+          error: "limit_reached",
+          message: "Бесплатный лимит исчерпан",
+          session_id: sessionId,
+          checks_remaining: 0,
+        },
+        { status: 429 }
       )
     }
 
@@ -288,11 +312,15 @@ export async function POST(request: NextRequest) {
       ...new Set([...(result.red_flags ?? []), ...mileageRedFlags]),
     ]
 
+    await saveCheck(sessionId)
+
     return NextResponse.json({
       ...result,
       red_flags,
       parsed_data: parsedData,
       known_issues: issues,
+      session_id: sessionId,
+      checks_remaining: getRemainingChecks(usedChecks + 1),
     })
   } catch (error) {
     console.error("[analyze] Unexpected error:", error)

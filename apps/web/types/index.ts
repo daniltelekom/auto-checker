@@ -24,4 +24,22 @@ export interface AnalysisData extends AnalysisResult {
 
 export type AnalyzeApiError = {
   error: string
+  message?: string
+  session_id?: string
+  checks_remaining?: number
+}
+
+export type ChecksStatus = {
+  session_id: string
+  checks_used: number
+  checks_remaining: number
+}
+
+export type FetchListingResult = {
+  title: string
+  price: string | null
+  year: string | null
+  mileage: string | null
+  description: string
+  seller: string | null
 }

@@ -193,23 +193,30 @@ function parsePrice(text: string): number | null {
   const millionMatch = text.match(
     /(?:цена[:\s]*)?(\d+(?:[.,]\d+)?)\s*млн(?:\s*(?:₽|руб\.?|р\.?))?/i
   )
+
   if (millionMatch?.[1]) {
     return Math.round(parseNumber(millionMatch[1]) * 1_000_000)
   }
 
-  const patterns = [
-    /цена[:\s]*(\d[\d\s]*)\s*(?:₽|руб\.?|р\.?)/i,
-    /(\d[\d\s]*)\s*(?:₽|руб\.?|р\.?)/i,
-  ]
+  const priceLineMatch = text.match(
+    /цена[:\s]*([\d\s]+)\s*(?:₽|руб\.?|р\.?)/i
+  )
 
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match?.[1]) {
-      const value = parseNumber(match[1])
-      if (value >= 10_000) {
-        return value
-      }
+  if (priceLineMatch?.[1]) {
+    const value = parseNumber(priceLineMatch[1])
+
+    if (value >= 10_000) {
+      return value
     }
+  }
+
+  const allPrices = [...text.matchAll(/([\d][\d\s]*)\s*(?:₽|руб\.?|р\.?)/gi)]
+  const candidates = allPrices
+    .map((match) => (match[1] ? parseNumber(match[1]) : 0))
+    .filter((value) => value >= 50_000)
+
+  if (candidates.length > 0) {
+    return Math.max(...candidates)
   }
 
   return null
