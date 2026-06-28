@@ -6,7 +6,12 @@
     "YANDEX_FOLDER_ID",
     "YANDEX_CLOUD_ID",
     "NEXT_PUBLIC_SUPABASE_URL",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY"
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "PROXY_1",
+    "PROXY_2",
+    "PROXY_3",
+    "PROXY_4",
+    "PROXY_5"
   ],
   "tasks": {
     "build": {

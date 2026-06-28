@@ -8,12 +8,19 @@ import {
   getSessionCheckCount,
   saveCheck,
 } from "@/lib/checks"
+import { calculateOwnershipCost } from "@/lib/calculateOwnershipCost"
+import { getPhotoRedFlags, type PhotoAnalysisResult } from "@/lib/analyzePhoto"
+import { checkHistory } from "@/lib/listingHistory"
 import { getCarIssues, type CarIssue } from "@/lib/getCarIssues"
-import { parseListing, type ParsedListing } from "@/lib/parseListing"
+import { fetchListing } from "@/lib/parseListing"
+import { parseListing, type ParsedListing } from "@/lib/parseListingText"
+import { predictBreakdowns } from "@/lib/predictBreakdowns"
 
 type AnalyzeRequestBody = {
   text?: string
   session_id?: string
+  url?: string
+  photos?: string[]
 }
 
 type YandexCompletionResponse = {
@@ -37,6 +44,71 @@ type AnalysisResult = {
 
 const YANDEX_API_URL =
   "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+
+const YANDEX_IMAGE_API_URL =
+  "https://llm.api.cloud.yandex.net/foundationModels/v1/imageCompletion"
+
+type YandexImageCompletionResponse = {
+  result?: {
+    alternatives?: Array<{
+      message?: {
+        text?: string
+      }
+    }>
+  }
+}
+
+async function analyzePhoto(photoUrl: string): Promise<PhotoAnalysisResult | null> {
+  try {
+    const apiKey = process.env.YANDEX_API_KEY?.trim()
+    const folderId = process.env.YANDEX_FOLDER_ID?.trim()
+    const cloudId = process.env.YANDEX_CLOUD_ID?.trim()
+
+    if (!apiKey || !folderId || !cloudId) {
+      return null
+    }
+
+    const response = await fetch(YANDEX_IMAGE_API_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Api-Key ${apiKey}`,
+        "x-folder-id": folderId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        modelUri: `gpt://${cloudId}/yandexgpt-lite`,
+        completionOptions: { stream: false, temperature: 0.2, maxTokens: 600 },
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: photoUrl } },
+              {
+                type: "text",
+                text: 'Проанализируй фото автомобиля. Найди: 1) Признаки перекраса (разнотон краски, шагрень) 2) Ржавчину 3) Повреждения ЛКП (царапины, вмятины) 4) Кривые зазоры между панелями 5) Износ салона (руль, педали, сиденья). Верни строго JSON: { findings: [{type: string, severity: "low"|"medium"|"high", description: string}], overallCondition: "good"|"fair"|"poor" }',
+              },
+            ],
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(45_000),
+    })
+
+    if (!response.ok) {
+      console.error("[analyzePhoto] API error:", response.status)
+      return null
+    }
+
+    const responseData = (await response.json()) as YandexImageCompletionResponse
+    const text = responseData.result?.alternatives?.[0]?.message?.text || "{}"
+    const trimmed = text.trim()
+    const match = trimmed.match(/\{[\s\S]*\}/)
+    return JSON.parse(match?.[0] ?? trimmed) as PhotoAnalysisResult
+  } catch (error) {
+    console.error("Photo analysis error:", error)
+    return null
+  }
+}
 
 const SYSTEM_PROMPT =
   "Ты эксперт-автоподборщик. Тебе даны структурированные данные объявления. Отвечай СТРОГО в формате JSON без markdown."
@@ -211,6 +283,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as AnalyzeRequestBody
     const text = body.text?.trim()
+    const url = body.url?.trim() || ''
     const sessionId = body.session_id?.trim() || randomUUID()
 
     if (!text) {
@@ -221,6 +294,13 @@ export async function POST(request: NextRequest) {
     }
 
     const usedChecks = await getSessionCheckCount(sessionId)
+
+    if (usedChecks === null) {
+      return NextResponse.json(
+        { error: "Сервис проверок временно недоступен" },
+        { status: 503 }
+      )
+    }
 
     if (usedChecks >= FREE_CHECK_LIMIT) {
       return NextResponse.json(
@@ -243,10 +323,39 @@ export async function POST(request: NextRequest) {
     const parsedData = parseListing(text)
     const { make, model, year } = parsedData
 
+    const data = url ? await fetchListing(url) : null
+
+    // Анализ фото
+    let photoAnalysis: PhotoAnalysisResult[] = []
+    if (data?.photos && data.photos.length > 0) {
+      console.log(`Found ${data.photos.length} photos, analyzing first 3...`)
+      const photosToAnalyze = data.photos.slice(0, 3)
+
+      for (const photoUrl of photosToAnalyze) {
+        try {
+          const result = await analyzePhoto(photoUrl)
+          if (result) photoAnalysis.push(result)
+        } catch (error) {
+          console.error("Photo analysis failed:", error)
+        }
+      }
+    }
+
+    const listingHistory = await checkHistory(url, parsedData.price)
+
     const issues =
       make && model && year !== null
         ? await getCarIssues(make, model, year)
         : []
+
+    const predictions = predictBreakdowns(issues, parsedData.mileage || 0)
+
+    const enginePowerMatch = parsedData.engine?.match(/(\d{2,3})\s*(?:л\.?\s*с|hp)/i)
+    const ownershipCost = calculateOwnershipCost({
+      enginePower: enginePowerMatch?.[1] ? parseInt(enginePowerMatch[1], 10) : null,
+      year: parsedData.year,
+      price: parsedData.price,
+    })
 
     console.log("[analyze] Using provider: yandexgpt-lite", {
       make,
@@ -295,30 +404,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: errorMessage }, { status: 500 })
     }
 
-    const data = (await apiResponse.json()) as YandexCompletionResponse
-    const content = data.result?.alternatives?.[0]?.message?.text
+    const yandexData = (await apiResponse.json()) as YandexCompletionResponse
+    const content = yandexData.result?.alternatives?.[0]?.message?.text
 
     if (!content) {
-      console.error("[analyze][yandex] Empty content in response:", data)
+      console.error("[analyze][yandex] Empty content in response:", yandexData)
       return NextResponse.json(
         { error: "Пустой ответ от YandexGPT API" },
         { status: 500 }
       )
     }
 
-    const result = parseAnalysisJson(content)
+    const analysis = parseAnalysisJson(content)
     const mileageRedFlags = getMileageRedFlags(parsedData.mileage, issues)
+    const photoRedFlags = getPhotoRedFlags(photoAnalysis)
     const red_flags = [
-      ...new Set([...(result.red_flags ?? []), ...mileageRedFlags]),
+      ...new Set([
+        ...(analysis.red_flags ?? []),
+        ...mileageRedFlags,
+        ...photoRedFlags,
+      ]),
     ]
 
     await saveCheck(sessionId)
 
     return NextResponse.json({
-      ...result,
+      ...analysis,
       red_flags,
       parsed_data: parsedData,
       known_issues: issues,
+      predictions,
+      ownership_cost: ownershipCost,
+      listing_history: listingHistory,
+      photo_analysis: photoAnalysis,
+      photos_count: data?.photos?.length || 0,
       session_id: sessionId,
       checks_remaining: getRemainingChecks(usedChecks + 1),
     })

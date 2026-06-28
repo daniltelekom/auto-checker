@@ -11,15 +11,6 @@ export type ParsedListingPage = {
   seller: string | null
 }
 
-const FETCH_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-  "Cache-Control": "no-cache",
-}
-
 export function detectListingSite(url: string): ListingSite | null {
   try {
     const hostname = new URL(url).hostname.replace(/^www\./, "")
@@ -91,14 +82,6 @@ function extractJsonLd($: cheerio.CheerioAPI): Record<string, unknown> | null {
   return result
 }
 
-function parseNumber(value: string): number {
-  return Number(value.replace(/\s/g, "").replace(",", "."))
-}
-
-function formatRubPrice(value: number): string {
-  return `${value.toLocaleString("ru-RU")} ₽`
-}
-
 function parsePriceAmount(raw: string | null | undefined): number | null {
   if (!raw) {
     return null
@@ -112,6 +95,10 @@ function parsePriceAmount(raw: string | null | undefined): number | null {
   }
 
   return Math.round(value)
+}
+
+function formatRubPrice(value: number): string {
+  return `${value.toLocaleString("ru-RU")} ₽`
 }
 
 function extractPrice($: cheerio.CheerioAPI, selectors: string[]): string | null {
@@ -302,7 +289,7 @@ function parseDrom($: cheerio.CheerioAPI): ParsedListingPage {
   return { title, price, year, mileage, description, seller }
 }
 
-function parseListingHtml(site: ListingSite, html: string): ParsedListingPage {
+export function parseListingHtml(site: ListingSite, html: string): ParsedListingPage {
   const $ = cheerio.load(html)
 
   switch (site) {
@@ -313,66 +300,4 @@ function parseListingHtml(site: ListingSite, html: string): ParsedListingPage {
     case "drom":
       return parseDrom($)
   }
-}
-
-export function formatListingForTextarea(data: ParsedListingPage): string {
-  const lines: string[] = []
-
-  if (data.title) {
-    lines.push(data.title)
-  }
-
-  if (data.price) {
-    lines.push(`Цена: ${data.price}`)
-  }
-
-  if (data.year) {
-    lines.push(`Год: ${data.year}`)
-  }
-
-  if (data.mileage) {
-    lines.push(`Пробег: ${data.mileage} км`)
-  }
-
-  if (data.seller) {
-    lines.push(`Продавец: ${data.seller}`)
-  }
-
-  if (data.description) {
-    if (lines.length > 0) {
-      lines.push("")
-    }
-    lines.push(data.description)
-  }
-
-  return lines.join("\n").trim()
-}
-
-export async function fetchListingFromUrl(
-  url: string
-): Promise<ParsedListingPage> {
-  const site = detectListingSite(url)
-
-  if (!site) {
-    throw new Error("unsupported_site")
-  }
-
-  const response = await fetch(url, {
-    headers: FETCH_HEADERS,
-    redirect: "follow",
-    cache: "no-store",
-  })
-
-  if (!response.ok) {
-    throw new Error(`fetch_failed_${response.status}`)
-  }
-
-  const html = await response.text()
-  const parsed = parseListingHtml(site, html)
-
-  if (!parsed.title && !parsed.description) {
-    throw new Error("parse_failed")
-  }
-
-  return parsed
 }

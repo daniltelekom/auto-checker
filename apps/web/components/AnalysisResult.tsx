@@ -277,6 +277,216 @@ function KnownIssuesCard({ issues }: { issues: AnalysisData["known_issues"] }) {
   )
 }
 
+function ListingHistoryCard({
+  history,
+}: {
+  history: AnalysisData["listing_history"]
+}) {
+  if (!history) return null
+
+  return (
+    <Card className="sm:col-span-2">
+      <CardHeader>
+        <CardTitle>История объявления</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <dt className="text-muted-foreground text-sm">На рынке</dt>
+            <dd className="font-medium">{history.daysOnMarket} дн.</dd>
+          </div>
+          {history.avgMarketPrice != null && (
+            <div>
+              <dt className="text-muted-foreground text-sm">Средняя цена в истории</dt>
+              <dd className="font-medium">
+                {history.avgMarketPrice.toLocaleString("ru-RU")} ₽
+              </dd>
+            </div>
+          )}
+          {history.priceChanges !== 0 && (
+            <div>
+              <dt className="text-muted-foreground text-sm">Изменение цены</dt>
+              <dd className="font-medium">
+                {history.priceChanges > 0 ? "+" : ""}
+                {history.priceChanges.toLocaleString("ru-RU")} ₽
+              </dd>
+            </div>
+          )}
+        </dl>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {history.isOverpriced && (
+            <span className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+              Возможно завышена
+            </span>
+          )}
+          {history.isUnderpriced && (
+            <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+              Возможно занижена
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function OwnershipCostCard({
+  cost,
+}: {
+  cost: AnalysisData["ownership_cost"]
+}) {
+  if (!cost) return null
+
+  const items = [
+    { label: "Налог", value: cost.tax },
+    { label: "ОСАГО", value: cost.insurance },
+    { label: "ТО и ремонт", value: cost.maintenance },
+    { label: "Топливо", value: cost.fuel },
+    { label: "Амортизация", value: cost.depreciation },
+  ]
+
+  return (
+    <Card className="sm:col-span-2">
+      <CardHeader>
+        <CardTitle>Стоимость владения (оценка)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <dl className="grid gap-3 sm:grid-cols-2">
+          {items.map((item) => (
+            <div key={item.label}>
+              <dt className="text-muted-foreground text-sm">{item.label}</dt>
+              <dd className="font-medium">
+                {item.value.toLocaleString("ru-RU")} ₽/год
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <div className="border-border border-t pt-3">
+          <p className="text-muted-foreground text-sm">Итого в год</p>
+          <p className="text-lg font-semibold">
+            {cost.totalYear.toLocaleString("ru-RU")} ₽
+            <span className="text-muted-foreground ml-2 text-sm font-normal">
+              (~{cost.totalMonth.toLocaleString("ru-RU")} ₽/мес)
+            </span>
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+const priorityLabels: Record<string, string> = {
+  soon: "Скоро",
+  medium: "Средний срок",
+  later: "Позже",
+}
+
+function PredictionsCard({
+  predictions,
+}: {
+  predictions: AnalysisData["predictions"]
+}) {
+  if (!predictions || predictions.length === 0) return null
+
+  return (
+    <Card className="sm:col-span-2">
+      <CardHeader>
+        <CardTitle>Прогноз поломок</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-3">
+          {predictions.map((prediction, index) => (
+            <li
+              key={`prediction-${index}`}
+              className="border-border rounded-lg border p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h3 className="font-medium">{prediction.issue}</h3>
+                <span className="bg-muted rounded-full px-2.5 py-1 text-xs font-medium">
+                  {priorityLabels[prediction.priority] ?? prediction.priority}
+                </span>
+              </div>
+              <p className="text-muted-foreground mt-2 text-sm">
+                Через ~{prediction.kmUntil.toLocaleString("ru-RU")} км · ремонт{" "}
+                {prediction.repairCostMin.toLocaleString("ru-RU")}–
+                {prediction.repairCostMax.toLocaleString("ru-RU")} ₽
+              </p>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  )
+}
+
+function photoSeverityClass(severity: string) {
+  switch (severity) {
+    case "high":
+      return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
+    case "medium":
+      return "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+    default:
+      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
+  }
+}
+
+function PhotoAnalysisCard({
+  photoAnalysis,
+  photosCount,
+}: {
+  photoAnalysis: AnalysisData["photo_analysis"]
+  photosCount: number
+}) {
+  if (!photoAnalysis || photoAnalysis.length === 0) return null
+
+  return (
+    <Card className="sm:col-span-2">
+      <CardHeader>
+        <CardTitle>
+          Анализ фото
+          {photosCount > 0 && (
+            <span className="text-muted-foreground ml-2 text-sm font-normal">
+              ({photoAnalysis.length} из {photosCount})
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {photoAnalysis.map((photoResult, photoIndex) => (
+          <div key={`photo-analysis-${photoIndex}`} className="space-y-2">
+            <p className="text-sm font-medium">
+              Фото {photoIndex + 1}
+              {photoResult.overallCondition && (
+                <span className="text-muted-foreground ml-2 font-normal">
+                  — {photoResult.overallCondition}
+                </span>
+              )}
+            </p>
+            {photoResult.findings?.length ? (
+              <ul className="space-y-2">
+                {photoResult.findings.map((finding, findingIndex) => (
+                  <li
+                    key={`photo-finding-${photoIndex}-${findingIndex}`}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-sm",
+                      photoSeverityClass(finding.severity)
+                    )}
+                  >
+                    <span className="font-medium">{finding.type}</span>
+                    <p className="mt-1 leading-relaxed">{finding.description}</p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground text-sm">Замечаний не найдено</p>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function AnalysisResult({ data }: AnalysisResultProps) {
   const [isDownloading, setIsDownloading] = useState(false)
 
@@ -318,6 +528,13 @@ export function AnalysisResult({ data }: AnalysisResultProps) {
 
       <ParsedDataCard parsed={data.parsed_data} />
       <KnownIssuesCard issues={data.known_issues} />
+      <ListingHistoryCard history={data.listing_history} />
+      <OwnershipCostCard cost={data.ownership_cost} />
+      <PredictionsCard predictions={data.predictions} />
+      <PhotoAnalysisCard
+        photoAnalysis={data.photo_analysis}
+        photosCount={data.photos_count ?? data.photos?.length ?? 0}
+      />
 
       <Card className="sm:col-span-2">
         <CardHeader>

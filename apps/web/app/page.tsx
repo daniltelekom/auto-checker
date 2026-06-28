@@ -14,7 +14,6 @@ import { Textarea } from "@workspace/ui/components/textarea"
 
 import { AnalysisResult as AnalysisResultView } from "@/components/AnalysisResult"
 import { normalizeAnalysisResult } from "@/lib/analysis"
-import { formatListingForTextarea } from "@/lib/parseListingHtml"
 import { FREE_CHECK_LIMIT } from "@/lib/limits"
 import { getOrCreateSessionId, storeSessionId } from "@/lib/session"
 import type {
@@ -22,15 +21,16 @@ import type {
   AnalyzeApiError,
   AnalysisResult,
   ChecksStatus,
-  FetchListingResult,
 } from "@/types"
 
 export default function Page() {
-  const [listingUrl, setListingUrl] = useState("")
+  const [url, setUrl] = useState('')
   const [text, setText] = useState("")
+  const [isFetching, setIsFetching] = useState(false)
+  const [fetchError, setFetchError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isFetchingListing, setIsFetchingListing] = useState(false)
   const [result, setResult] = useState<AnalysisData | null>(null)
+  const [listingPhotos, setListingPhotos] = useState<string[]>([])
   const [checksRemaining, setChecksRemaining] = useState(FREE_CHECK_LIMIT)
   const [showLimitModal, setShowLimitModal] = useState(false)
 
@@ -58,37 +58,31 @@ export default function Page() {
     void loadChecksStatus()
   }, [])
 
-  async function handleFetchListing() {
-    const url = listingUrl.trim()
-
-    if (!url || isFetchingListing || isLoading) {
-      return
-    }
-
-    setIsFetchingListing(true)
+  const handleFetchUrl = async () => {
+    if (!url) return
+    setIsFetching(true)
+    setFetchError('')
 
     try {
-      const response = await fetch("/api/fetch-listing", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+      const res = await fetch('/api/fetch-listing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
       })
+      const data = await res.json()
 
-      const data = (await response.json()) as FetchListingResult | { error: string }
-
-      if (!response.ok) {
-        alert("Не удалось загрузить. Скопируйте текст вручную")
-        return
+      if (!res.ok || data.error) {
+        setFetchError(
+          data.error || 'Не удалось загрузить объявление. Попробуйте скопировать текст вручную.'
+        )
+      } else {
+        setText(data.description)
+        setListingPhotos(data.photos || [])
       }
-
-      setText(formatListingForTextarea(data as FetchListingResult))
-    } catch (error) {
-      console.error("[page] fetch listing failed:", error)
-      alert("Не удалось загрузить. Скопируйте текст вручную")
+    } catch {
+      setFetchError('Ошибка сети. Скопируйте текст вручную.')
     } finally {
-      setIsFetchingListing(false)
+      setIsFetching(false)
     }
   }
 
@@ -118,6 +112,8 @@ export default function Page() {
         body: JSON.stringify({
           text: trimmedText,
           session_id: sessionId,
+          url: url.trim() || undefined,
+          photos: listingPhotos.length > 0 ? listingPhotos : undefined,
         }),
       })
 
@@ -153,7 +149,7 @@ export default function Page() {
         setChecksRemaining(data.checks_remaining)
       }
 
-      setResult(normalizeAnalysisResult(data as AnalysisResult))
+      setResult(normalizeAnalysisResult(data as AnalysisResult, listingPhotos))
     } catch (error) {
       console.error("[page] analyze request failed:", error)
       alert("Ошибка сети. Проверьте подключение и попробуйте снова.")
@@ -185,14 +181,32 @@ export default function Page() {
         </header>
 
         <section className="space-y-4">
-          <input
-            type="url"
-            value={listingUrl}
-            onChange={(event) => setListingUrl(event.target.value)}
-            placeholder="https://www.avito.ru/..."
-            disabled={isLoading || isFetchingListing}
-            className="border-input bg-transparent placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 flex h-10 w-full rounded-md border px-2.5 py-2 text-base shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
-          />
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-2">Ссылка на объявление</label>
+            <div className="flex gap-2">
+              <input
+                type="url"
+                placeholder="https://www.avito.ru/..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="flex-1 px-4 py-2 border rounded-lg bg-white text-black"
+              />
+              <button
+                onClick={handleFetchUrl}
+                disabled={isFetching || !url}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 hover:bg-blue-700"
+              >
+                {isFetching ? 'Загрузка...' : 'Загрузить'}
+              </button>
+            </div>
+            {fetchError && (
+              <p className="text-red-500 text-sm mt-2">{fetchError}</p>
+            )}
+          </div>
+
+          <div className="mb-2">
+            <label className="block text-sm font-medium mb-2">Или вставьте текст вручную</label>
+          </div>
 
           <Textarea
             value={text}
@@ -200,7 +214,7 @@ export default function Page() {
             onKeyDown={handleTextareaKeyDown}
             placeholder="Вставьте текст объявления с Авито, Авто.ру или Дрома..."
             rows={10}
-            disabled={isLoading || isFetchingListing}
+            disabled={isLoading || isFetching}
             className="min-h-48 resize-y text-base"
           />
 
@@ -210,26 +224,10 @@ export default function Page() {
 
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
-              size="lg"
-              onClick={() => void handleFetchListing()}
-              disabled={!listingUrl.trim() || isLoading || isFetchingListing}
-            >
-              {isFetchingListing ? (
-                <>
-                  <Loader2 className="animate-spin" />
-                  Загружаю...
-                </>
-              ) : (
-                "Загрузить из ссылки"
-              )}
-            </Button>
-
-            <Button
               variant="default"
               size="lg"
               onClick={() => void handleSubmit()}
-              disabled={!text.trim() || isLoading || isFetchingListing || checksRemaining <= 0}
+              disabled={!text.trim() || isLoading || isFetching || checksRemaining <= 0}
             >
               {isLoading ? (
                 <>
@@ -246,11 +244,43 @@ export default function Page() {
         {isLoading && (
           <div className="text-muted-foreground flex items-center justify-center gap-2 py-8 text-sm">
             <Loader2 className="size-4 animate-spin" />
-            <span>Анализирую объявление...</span>
+            <span>Анализирую объявление и фото...</span>
           </div>
         )}
 
         {result && <AnalysisResultView data={result} />}
+
+        {result?.photo_analysis && result.photo_analysis.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-xl font-bold mb-4">📸 Анализ фото ({result.photos_count} фото)</h3>
+            <div className="space-y-3">
+              {result.photo_analysis.map((analysis, idx) => (
+                <div key={idx} className="border rounded-lg p-4">
+                  <div className="flex justify-between mb-2">
+                    <span className="font-medium">Фото #{idx + 1}</span>
+                    <span className={`px-2 py-1 rounded text-sm ${
+                      analysis.overallCondition === 'good' ? 'bg-green-100 text-green-800' :
+                      analysis.overallCondition === 'fair' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {analysis.overallCondition === 'good' ? 'Хорошо' :
+                       analysis.overallCondition === 'fair' ? 'Средне' : 'Плохо'}
+                    </span>
+                  </div>
+                  {analysis.findings && analysis.findings.length > 0 && (
+                    <ul className="space-y-1">
+                      {analysis.findings.map((f, i) => (
+                        <li key={i} className="text-sm">
+                          <span className="font-medium">{f.type}:</span> {f.description}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {showLimitModal && (

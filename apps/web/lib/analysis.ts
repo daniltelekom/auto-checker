@@ -1,4 +1,4 @@
-import type { AnalysisData, AnalysisResult, VerdictType } from "@/types"
+import type { AnalysisData, AnalysisResult, VerdictType } from '@/types'
 
 export function inferVerdictType(verdict: string): VerdictType {
   const text = verdict.toLowerCase()
@@ -6,17 +6,20 @@ export function inferVerdictType(verdict: string): VerdictType {
   if (
     /избегать|не брать|не рекоменд|отказаться|опасно|не стоит/.test(text)
   ) {
-    return "negative"
+    return 'negative'
   }
 
   if (/брать|рекомендую|отличный|стоит покупать|хороший вариант/.test(text)) {
-    return "positive"
+    return 'positive'
   }
 
-  return "caution"
+  return 'caution'
 }
 
-export function normalizeAnalysisResult(data: AnalysisResult): AnalysisData {
+export function normalizeAnalysisResult(
+  data: AnalysisResult,
+  photos?: string[]
+): AnalysisData {
   return {
     price_analysis: data.price_analysis,
     common_issues: data.common_issues ?? [],
@@ -26,6 +29,12 @@ export function normalizeAnalysisResult(data: AnalysisResult): AnalysisData {
     verdict: data.verdict,
     parsed_data: data.parsed_data,
     known_issues: data.known_issues ?? [],
+    predictions: data.predictions ?? [],
+    ownership_cost: data.ownership_cost,
+    listing_history: data.listing_history ?? null,
+    photo_analysis: data.photo_analysis ?? [],
+    photos_count: data.photos_count ?? photos?.length ?? 0,
+    photos,
     verdict_type: inferVerdictType(data.verdict),
   }
 }

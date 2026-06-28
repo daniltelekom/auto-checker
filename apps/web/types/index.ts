@@ -1,11 +1,14 @@
-import type { CarIssue } from "@/lib/getCarIssues"
-import type { ParsedListing } from "@/lib/parseListing"
+import type { CostBreakdown } from '@/lib/calculateOwnershipCost'
+import type { ListingHistoryResult } from '@/lib/listingHistory'
+import type { PhotoAnalysisResult } from '@/lib/analyzePhoto'
+import type { PredictedBreakdown } from '@/lib/predictBreakdowns'
+import type { ListingData } from '@/lib/parseListing'
+import type { CarIssue } from '@/lib/getCarIssues'
+import type { ParsedListing } from '@/lib/parseListingText'
 
-export type { ParsedListing }
+export type { ParsedListing, ListingData, CarIssue, PhotoAnalysisResult, PredictedBreakdown, CostBreakdown, ListingHistoryResult }
 
-export type { CarIssue }
-
-export type VerdictType = "positive" | "caution" | "negative"
+export type VerdictType = 'positive' | 'caution' | 'negative'
 
 export interface AnalysisResult {
   price_analysis: string
@@ -16,10 +19,16 @@ export interface AnalysisResult {
   verdict: string
   parsed_data: ParsedListing
   known_issues: CarIssue[]
+  predictions?: PredictedBreakdown[]
+  ownership_cost?: CostBreakdown
+  listing_history?: ListingHistoryResult | null
+  photo_analysis?: PhotoAnalysisResult[]
+  photos_count?: number
 }
 
 export interface AnalysisData extends AnalysisResult {
   verdict_type: VerdictType
+  photos?: string[]
 }
 
 export type AnalyzeApiError = {
@@ -33,13 +42,11 @@ export type ChecksStatus = {
   session_id: string
   checks_used: number
   checks_remaining: number
+  error?: string
 }
 
-export type FetchListingResult = {
-  title: string
-  price: string | null
-  year: string | null
-  mileage: string | null
+export type PhotoFinding = {
+  type: string
+  severity: 'low' | 'medium' | 'high'
   description: string
-  seller: string | null
 }

@@ -11,9 +11,9 @@ function getWindowStart(): string {
   return date.toISOString()
 }
 
-export async function getSessionCheckCount(sessionId: string): Promise<number> {
+export async function getSessionCheckCount(sessionId: string): Promise<number | null> {
   if (!supabase) {
-    return 0
+    return null
   }
 
   const { count, error } = await supabase
@@ -24,7 +24,7 @@ export async function getSessionCheckCount(sessionId: string): Promise<number> {
 
   if (error) {
     console.error("[checks] count failed:", error)
-    return 0
+    return null
   }
 
   return count ?? 0

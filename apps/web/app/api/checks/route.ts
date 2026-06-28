@@ -17,6 +17,13 @@ export async function GET(request: NextRequest) {
 
   const usedCount = await getSessionCheckCount(sessionId)
 
+  if (usedCount === null) {
+    return NextResponse.json(
+      { error: "checks_unavailable", message: "Сервис проверок временно недоступен" },
+      { status: 503 }
+    )
+  }
+
   return NextResponse.json({
     session_id: sessionId,
     checks_used: usedCount,

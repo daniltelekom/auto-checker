@@ -1,391 +1,301 @@
-export interface ParsedListing {
-  make: string | null
-  model: string | null
-  year: number | null
-  mileage: number | null
-  price: number | null
-  engine: string | null
-  transmission: string | null
-  bodyType: string | null
-  color: string | null
-  owners: number | null
-  description: string
+import * as cheerio from 'cheerio';
+import fetch from 'node-fetch';
+import { ProxyAgent } from 'proxy-agent';
+
+const PROXIES = [
+  process.env.PROXY_1 || '',
+  process.env.PROXY_2 || '',
+  process.env.PROXY_3 || '',
+  process.env.PROXY_4 || '',
+  process.env.PROXY_5 || '',
+  process.env.PROXY_6 || '',
+].filter(p => p);
+
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+];
+
+export interface ListingData {
+  url: string;
+  price: number | null;
+  title: string;
+  year: number | null;
+  mileage: number | null;
+  description: string;
+  photos: string[];
+  seller: string;
+  phone: string | null;
+  source: 'avito' | 'auto.ru' | 'drom' | 'unknown';
 }
 
-type CarEntry = {
-  make: string
-  models: string[]
-  aliases?: string[]
+function getRandomProxyAgent(): ProxyAgent | undefined {
+  if (PROXIES.length === 0) return undefined;
+  const proxy = PROXIES[Math.floor(Math.random() * PROXIES.length)]!;
+  return new ProxyAgent(proxy as ConstructorParameters<typeof ProxyAgent>[0]);
 }
 
-const CAR_DATABASE: CarEntry[] = [
-  { make: "Toyota", models: ["Land Cruiser", "Highlander", "RAV4", "Camry", "Corolla", "Prius", "Hilux", "Yaris", "Avensis", "C-HR", "Fortuner", "Alphard"] },
-  { make: "BMW", models: ["X7", "X6", "X5", "X4", "X3", "X2", "X1", "7 Series", "6 Series", "5 Series", "4 Series", "3 Series", "2 Series", "1 Series", "M5", "M3", "iX", "i4", "i3"] },
-  { make: "Mercedes-Benz", models: ["GLE", "GLS", "GLC", "GLB", "GLA", "G-Class", "E-Class", "S-Class", "C-Class", "A-Class", "CLA", "CLS", "ML", "GL", "V-Class", "Sprinter"], aliases: ["Mercedes", "Мерседес"] },
-  { make: "Audi", models: ["Q8", "Q7", "Q5", "Q3", "Q2", "A8", "A7", "A6", "A5", "A4", "A3", "TT", "e-tron", "RS6", "RS5", "RS3"] },
-  { make: "Volkswagen", models: ["Touareg", "Tiguan", "Passat", "Golf", "Polo", "Jetta", "Amarok", "Transporter", "Multivan", "Taos", "Arteon", "ID.4"], aliases: ["VW", "Фольксваген"] },
-  { make: "Kia", models: ["Sportage", "Sorento", "Cerato", "Rio", "K5", "Ceed", "Soul", "Optima", "Stinger", "Mohave", "Carnival", "Seltos", "K3", "Picanto"] },
-  { make: "Hyundai", models: ["Santa Fe", "Tucson", "Creta", "Solaris", "Elantra", "Sonata", "Palisade", "i30", "i40", "ix35", "Accent", "Staria", "Kona"] },
-  { make: "Lada", models: ["Vesta", "Granta", "Largus", "Niva", "Kalina", "Priora", "XRAY", "XRay", "2114", "2115", "2107", "2109"], aliases: ["ВАЗ", "LADA"] },
-  { make: "Renault", models: ["Duster", "Logan", "Sandero", "Kaptur", "Arkana", "Megane", "Fluence", "Scenic", "Koleos", "Talisman", "Kangoo"] },
-  { make: "Nissan", models: ["X-Trail", "Qashqai", "Murano", "Patrol", "Teana", "Almera", "Juke", "Note", "Pathfinder", "Terrano", "Leaf", "Sentra"] },
-  { make: "Mazda", models: ["CX-9", "CX-5", "CX-30", "CX-3", "Mazda6", "Mazda3", "Mazda2", "MX-5", "BT-50"] },
-  { make: "Ford", models: ["Explorer", "Mondeo", "Focus", "Kuga", "Fiesta", "Transit", "Ranger", "Mustang", "EcoSport", "Galaxy", "Fusion", "Edge"] },
-  { make: "Chevrolet", models: ["Tahoe", "Captiva", "Cruze", "Aveo", "Niva", "Lacetti", "Orlando", "Traverse", "Camaro", "Corvette", "Spark", "Malibu"] },
-  { make: "Skoda", models: ["Kodiaq", "Karoq", "Octavia", "Superb", "Rapid", "Fabia", "Yeti", "Kamiq", "Scala", "Roomster"] },
-  { make: "Honda", models: ["CR-V", "Civic", "Accord", "Pilot", "Fit", "HR-V", "Odyssey", "Jazz", "City"] },
-  { make: "Lexus", models: ["RX", "NX", "GX", "LX", "ES", "IS", "UX", "LS", "LC", "CT"] },
-  { make: "Mitsubishi", models: ["Outlander", "Pajero", "Lancer", "ASX", "Eclipse Cross", "L200", "Colt", "Galant"] },
-  { make: "Volvo", models: ["XC90", "XC60", "XC40", "S90", "S60", "V90", "V60", "V40", "C40"] },
-  { make: "Subaru", models: ["Forester", "Outback", "Impreza", "Legacy", "XV", "WRX", "Crosstrek", "Ascent"] },
-  { make: "Chery", models: ["Tiggo 8", "Tiggo 7", "Tiggo 4", "Tiggo", "Arrizo", "Bonus", "Amulet", "IndiS"] },
-  { make: "Geely", models: ["Monjaro", "Coolray", "Atlas", "Emgrand", "Tugella", "Okavango", "Preface"] },
-  { make: "Haval", models: ["Dargo", "Jolion", "F7", "H6", "H9", "M6", "F7x"] },
-  { make: "Changan", models: ["CS75", "CS55", "CS35", "Alsvin", "UNI-K", "UNI-T", "Eado"] },
-  { make: "Exeed", models: ["VX", "TXL", "LX", "RX"] },
-  { make: "Omoda", models: ["C5", "S5"] },
-  { make: "Jaecoo", models: ["J8", "J7"] },
-  { make: "Tank", models: ["500", "300"] },
-  { make: "BYD", models: ["Atto 3", "Song", "Tang", "Han", "Seal", "Dolphin"] },
-  { make: "Land Rover", models: ["Range Rover Sport", "Range Rover", "Discovery", "Defender", "Evoque", "Freelander", "Velar"] },
-  { make: "Jeep", models: ["Grand Cherokee", "Cherokee", "Wrangler", "Compass", "Renegade", "Gladiator"] },
-  { make: "Porsche", models: ["Cayenne", "Macan", "Panamera", "Taycan", "911", "Boxster", "Cayman"] },
-  { make: "Infiniti", models: ["QX80", "QX60", "QX50", "QX30", "Q50", "Q60", "FX35", "FX37", "G37", "EX35"] },
-  { make: "Opel", models: ["Insignia", "Astra", "Corsa", "Mokka", "Zafira", "Antara", "Vectra", "Meriva"] },
-  { make: "Peugeot", models: ["3008", "2008", "5008", "408", "308", "301", "Partner", "Boxer", "107", "206", "207"] },
-  { make: "Citroen", models: ["C5", "C4", "C3", "Berlingo", "Jumper", "DS4", "Xsara", "C-Crosser"], aliases: ["Citroën"] },
-  { make: "Suzuki", models: ["Grand Vitara", "Vitara", "Swift", "Jimny", "SX4", "Ignis", "Baleno"] },
-  { make: "UAZ", models: ["Patriot", "Hunter", "Pickup", "Profi", "Буханка"], aliases: ["УАЗ"] },
-  { make: "GAZ", models: ["Volga", "Sobol", "Gazelle", "Газель"], aliases: ["ГАЗ"] },
-  { make: "Datsun", models: ["on-DO", "mi-DO", "mi-DO"] },
-  { make: "Genesis", models: ["GV80", "GV70", "G80", "G70", "GV60"] },
-  { make: "Cadillac", models: ["Escalade", "XT5", "XT6", "CTS", "SRX", "CT5"] },
-  { make: "Jaguar", models: ["F-Pace", "E-Pace", "XF", "XJ", "XE", "I-Pace"] },
-  { make: "Mini", models: ["Countryman", "Cooper", "Clubman", "Paceman"] },
-  { make: "SsangYong", models: ["Rexton", "Kyron", "Actyon", "Korando", "Tivoli"] },
-  { make: "Dodge", models: ["Durango", "Challenger", "Charger", "Ram", "Journey", "Caliber"] },
-  { make: "Chrysler", models: ["300C", "Pacifica", "Voyager", "Sebring"] },
-  { make: "Tesla", models: ["Model Y", "Model X", "Model S", "Model 3", "Cybertruck"] },
-  { make: "Fiat", models: ["Ducato", "Doblo", "500", "Punto", "Tipo", "Fullback"] },
-  { make: "Seat", models: ["Leon", "Ibiza", "Ateca", "Arona", "Alhambra"] },
-  { make: "Lifan", models: ["X60", "X50", "Solano", "Smily", "Breez"] },
-  { make: "Great Wall", models: ["Hover", "Poer", "Wingle", "Safe"] },
-  { make: "Isuzu", models: ["D-Max", "MU-X"] },
-  { make: "Daewoo", models: ["Nexia", "Matiz", "Lacetti", "Gentra"] },
-  { make: "Ravon", models: ["R4", "R2", "Nexia", "Gentra"] },
-  { make: "Zeekr", models: ["001", "X", "009"] },
-  { make: "Jetour", models: ["Dashing", "X70", "X90", "T2"] },
-  { make: "Belgee", models: ["X50", "X70"] },
-  { make: "Moskvich", models: ["3", "3e", "6"], aliases: ["Москвич"] },
-]
-
-const TRANSMISSION_KEYWORDS: Array<{ pattern: RegExp; value: string }> = [
-  { pattern: /\bвариатор\b|\bcvt\b/i, value: "вариатор" },
-  { pattern: /\bробот\b|\bamt\b|\bdct\b|\bdsg\b/i, value: "робот" },
-  { pattern: /\bавтомат\b|\bакпп\b|\bat\b|\bавтоматическая\b/i, value: "автомат" },
-  { pattern: /\bмеханика\b|\bмкпп\b|\bmt\b|\bручн(?:ая|ой)\b|\bмеханическая\b/i, value: "механика" },
-]
-
-const BODY_TYPE_KEYWORDS: Array<{ pattern: RegExp; value: string }> = [
-  { pattern: /\bвнедорожник\b|\bджип\b|\bsuv\b/i, value: "внедорожник" },
-  { pattern: /\bкроссовер\b/i, value: "кроссовер" },
-  { pattern: /\bуниверсал\b/i, value: "универсал" },
-  { pattern: /\bхэтчбек\b|\bхетчбек\b|\bхетчбэк\b/i, value: "хэтчбек" },
-  { pattern: /\bлифтбек\b/i, value: "лифтбек" },
-  { pattern: /\bседан\b/i, value: "седан" },
-  { pattern: /\bминивэн\b|\bминивен\b/i, value: "минивэн" },
-  { pattern: /\bкупе\b/i, value: "купе" },
-  { pattern: /\bкабриолет\b|\bкабрио\b/i, value: "кабриолет" },
-  { pattern: /\bпикап\b/i, value: "пикап" },
-  { pattern: /\bфургон\b/i, value: "фургон" },
-]
-
-const COLOR_KEYWORDS = [
-  "перламутровый",
-  "серебристый",
-  "золотистый",
-  "бордовый",
-  "фиолетовый",
-  "коричневый",
-  "оранжевый",
-  "бежевый",
-  "голубой",
-  "зелёный",
-  "зеленый",
-  "жёлтый",
-  "желтый",
-  "чёрный",
-  "черный",
-  "белый",
-  "серый",
-  "синий",
-  "красный",
-]
-
-type ModelMatch = {
-  make: string
-  model: string
-  index: number
+function getRandomUserAgent() {
+  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]!;
 }
 
-function normalizeText(text: string): string {
-  return text.replace(/\u00a0/g, " ").replace(/\s+/g, " ")
-}
+async function fetchHtml(url: string): Promise<string> {
+  const isAvito = url.includes('avito.ru');
+  const isDrom = url.includes('drom.ru');
 
-function parseNumber(value: string): number {
-  return Number(value.replace(/\s/g, "").replace(",", "."))
-}
+  try {
+    const agent = getRandomProxyAgent();
+    if (agent) {
+      const response = await fetch(url, {
+        agent: agent,
+        headers: {
+          'User-Agent': getRandomUserAgent(),
+          'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.8',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Cache-Control': 'max-age=0',
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Upgrade-Insecure-Requests': '1',
+          ...(isAvito && {
+            'Referer': 'https://www.avito.ru/',
+          }),
+          ...(isDrom && {
+            'Referer': 'https://www.drom.ru/',
+          }),
+        },
+      } as any);
 
-function parseYear(text: string): number | null {
-  const patterns = [
-    /\b(19[89]\d|20[0-2]\d)\s*(?:г\.?\s*в\.?|год(?:\s+выпуска)?|г\.?)\b/i,
-    /\bвыпуск[:\s]+(19[89]\d|20[0-2]\d)\b/i,
-    /\b(19[89]\d|20[0-2]\d)\s*г\b/i,
-  ]
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match?.[1]) {
-      const year = Number(match[1])
-      if (year >= 1980 && year <= new Date().getFullYear() + 1) {
-        return year
+      if (response.ok) {
+        return await response.text();
       }
     }
+  } catch (error) {
+    console.log('Proxy failed, trying without proxy...');
   }
 
-  const fallback = text.match(/\b(20(?:1[0-9]|2[0-6])|19(?:8\d|9\d))\b/)
-  if (fallback?.[1]) {
-    return Number(fallback[1])
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': getRandomUserAgent(),
+      'Accept-Language': 'ru-RU,ru;q=0.9',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
   }
 
-  return null
+  return await response.text();
 }
 
-function parseMileage(text: string): number | null {
-  const patterns = [
-    /пробег[:\s]*(\d[\d\s]*)\s*(?:тыс\.?|т\.?)?\s*км/i,
-    /(\d[\d\s]*)\s*(?:тыс\.?|т\.?)\s*км/i,
-    /(\d[\d\s]*)\s*км/i,
-  ]
+function extractParams($: cheerio.CheerioAPI): Record<string, string> {
+  const params: Record<string, string> = {};
 
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (!match?.[1]) {
-      continue
+  // Авито
+  $('[data-marker="item-params"] li, .item-params li').each((_, el) => {
+    const text = $(el).text().trim();
+    const parts = text.split(/—|:/);
+    if (parts.length >= 2 && parts[0]) {
+      params[parts[0].trim()] = parts.slice(1).join('').trim();
+    }
+  });
+
+  // Авто.ру
+  $('.CardInfoBlock li, [data-marker="params-list"] li').each((_, el) => {
+    const text = $(el).text().trim();
+    const parts = text.split(/—|:/);
+    if (parts.length >= 2 && parts[0]) {
+      params[parts[0].trim()] = parts.slice(1).join('').trim();
+    }
+  });
+
+  // Дром
+  $('.b-info-list li, [data-name="param"]').each((_, el) => {
+    const text = $(el).text().trim();
+    const parts = text.split(/—|:/);
+    if (parts.length >= 2 && parts[0]) {
+      params[parts[0].trim()] = parts.slice(1).join('').trim();
+    }
+  });
+
+  return params;
+}
+
+function extractPhotos($: cheerio.CheerioAPI): string[] {
+  const photos: string[] = [];
+
+  // Авито
+  $('[data-marker="gallery-img"] img, .gallery-img img').each((_, el) => {
+    const src = $(el).attr('src') || $(el).attr('data-src');
+    if (src && src.startsWith('http')) photos.push(src);
+  });
+
+  // Авто.ру
+  $('.CarouselImage img, [data-marker="gallery-img"] img').each((_, el) => {
+    const src = $(el).attr('src');
+    if (src && src.startsWith('http')) photos.push(src);
+  });
+
+  // Дром
+  $('.b-gallery__item img, [data-name="photo"]').each((_, el) => {
+    const src = $(el).attr('src') || $(el).attr('data-src');
+    if (src && src.startsWith('http')) photos.push(src);
+  });
+
+  return [...new Set(photos)]; // убираем дубликаты
+}
+
+export async function parseAvito(url: string): Promise<ListingData | null> {
+  try {
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
+
+    const titleText = $('title').text().toLowerCase();
+    if (html.includes('captcha') || titleText.includes('403') || titleText.includes('captcha')) {
+      console.log('Avito returned captcha/403 page, trying alternative approach...');
     }
 
-    const raw = match[0].toLowerCase()
-    const value = parseNumber(match[1])
+    const priceText =
+      $('[data-marker="item-price"]').text().trim() ||
+      $('[data-marker="price"]').text().trim() ||
+      $('[itemprop="price"]').text().trim() ||
+      $('.price').text().trim();
+    const price = parseInt(priceText.replace(/\D/g, '')) || null;
 
-    if (raw.includes("тыс") || raw.includes(" т.")) {
-      return value * 1000
-    }
+    const title =
+      $('h1').text().trim() ||
+      $('[data-marker="item-title"]').text().trim() ||
+      $('[itemprop="name"]').text().trim();
 
-    if (value >= 1000) {
-      return value
-    }
-  }
+    const description =
+      $('[data-marker="item-description"]').text().trim() ||
+      $('[data-marker="description"]').text().trim() ||
+      $('[itemprop="description"]').text().trim();
 
-  return null
-}
-
-function parsePrice(text: string): number | null {
-  const millionMatch = text.match(
-    /(?:цена[:\s]*)?(\d+(?:[.,]\d+)?)\s*млн(?:\s*(?:₽|руб\.?|р\.?))?/i
-  )
-
-  if (millionMatch?.[1]) {
-    return Math.round(parseNumber(millionMatch[1]) * 1_000_000)
-  }
-
-  const priceLineMatch = text.match(
-    /цена[:\s]*([\d\s]+)\s*(?:₽|руб\.?|р\.?)/i
-  )
-
-  if (priceLineMatch?.[1]) {
-    const value = parseNumber(priceLineMatch[1])
-
-    if (value >= 10_000) {
-      return value
-    }
-  }
-
-  const allPrices = [...text.matchAll(/([\d][\d\s]*)\s*(?:₽|руб\.?|р\.?)/gi)]
-  const candidates = allPrices
-    .map((match) => (match[1] ? parseNumber(match[1]) : 0))
-    .filter((value) => value >= 50_000)
-
-  if (candidates.length > 0) {
-    return Math.max(...candidates)
-  }
-
-  return null
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-function findIndex(text: string, value: string): number {
-  const pattern = new RegExp(`\\b${escapeRegExp(value)}\\b`, "i")
-  const match = pattern.exec(text)
-  return match?.index ?? -1
-}
-
-function parseMakeModel(text: string): { make: string | null; model: string | null } {
-  const normalized = normalizeText(text)
-  const modelMatches: ModelMatch[] = []
-
-  for (const entry of CAR_DATABASE) {
-    for (const model of entry.models) {
-      const index = findIndex(normalized, model)
-      if (index >= 0) {
-        modelMatches.push({ make: entry.make, model, index })
+    const params: Record<string, string> = {};
+    $('[data-marker="item-params"] li, .item-params li, [data-marker="params-list"] li').each((_, el) => {
+      const text = $(el).text().trim();
+      const parts = text.split(/—|:/);
+      if (parts.length >= 2 && parts[0]) {
+        params[parts[0].trim()] = parts.slice(1).join('').trim();
       }
+    });
+
+    const year = params['Год выпуска'] ? parseInt(params['Год выпуска']) : null;
+    const mileage = params['Пробег'] ? parseInt(params['Пробег'].replace(/\D/g, '')) : null;
+
+    const photos: string[] = [];
+    $('[data-marker="gallery-img"] img, .gallery-img img, [itemprop="image"]').each((_, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src');
+      if (src && src.startsWith('http')) photos.push(src);
+    });
+
+    const seller =
+      $('[data-marker="seller-name"]').text().trim() ||
+      $('[itemprop="seller"]').text().trim() ||
+      'Частное лицо';
+
+    if (title || description || price) {
+      return {
+        url, price, title, year, mileage,
+        description: `${title}\n\n${description}\n\n${Object.entries(params).map(([k, v]) => `${k}: ${v}`).join('\n')}`,
+        photos, seller, phone: null, source: 'avito',
+      };
     }
+
+    return null;
+  } catch (error) {
+    console.error('Avito parse error:', error);
+    return null;
   }
+}
 
-  if (modelMatches.length > 0) {
-    modelMatches.sort((a, b) => {
-      if (b.model.length !== a.model.length) {
-        return b.model.length - a.model.length
-      }
-      return a.index - b.index
-    })
+export async function parseAutoRu(url: string): Promise<ListingData | null> {
+  try {
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
 
-    const best = modelMatches[0]!
+    if (html.includes('captcha') || $('title').text().includes('403')) {
+      throw new Error('Blocked by Auto.ru');
+    }
+
+    const priceText = $('.OfferPriceCaption__price').text().trim() ||
+                      $('[data-marker="price"]').text().trim();
+    const price = parseInt(priceText.replace(/\D/g, '')) || null;
+
+    const title = $('h1').text().trim() || $('.OfferTitle').text().trim();
+    const description = $('.CardDescription__text').text().trim() ||
+                        $('[data-marker="description"]').text().trim();
+
+    const params = extractParams($);
+    const year = params['Год выпуска'] ? parseInt(params['Год выпуска']) : null;
+    const mileage = params['Пробег'] ? parseInt(params['Пробег'].replace(/\D/g, '')) : null;
+    const photos = extractPhotos($);
+    const seller = $('.OfferSellerName').text().trim() || 'Частное лицо';
+
     return {
-      make: best.make,
-      model: best.model,
-    }
-  }
-
-  let makeMatch: { make: string; index: number } | null = null
-
-  for (const entry of CAR_DATABASE) {
-    const names = [entry.make, ...(entry.aliases ?? [])]
-    for (const name of names) {
-      const index = findIndex(normalized, name)
-      if (index >= 0 && (!makeMatch || index < makeMatch.index)) {
-        makeMatch = { make: entry.make, index }
-      }
-    }
-  }
-
-  return {
-    make: makeMatch?.make ?? null,
-    model: null,
+      url, price, title, year, mileage,
+      description: `${title}\n\n${description}\n\n${Object.entries(params).map(([k, v]) => `${k}: ${v}`).join('\n')}`,
+      photos, seller, phone: null, source: 'auto.ru',
+    };
+  } catch (error) {
+    console.error('AutoRu parse error:', error);
+    return null;
   }
 }
 
-function parseEngine(text: string): string | null {
-  const parts: string[] = []
+export async function parseDrom(url: string): Promise<ListingData | null> {
+  try {
+    const html = await fetchHtml(url);
+    const $ = cheerio.load(html);
 
-  const volumeMatch = text.match(/\b(\d[.,]\d)\s*(?:л|литр(?:а|ов)?)\b/i)
-  if (volumeMatch?.[1]) {
-    parts.push(`${volumeMatch[1].replace(",", ".")} л`)
-  }
-
-  const fuelPatterns: Array<{ pattern: RegExp; value: string }> = [
-    { pattern: /\bдизель(?:ный)?\b|\bdiesel\b/i, value: "дизель" },
-    { pattern: /\bбензин(?:овый)?\b|\bpetrol\b|\bgasoline\b/i, value: "бензин" },
-    { pattern: /\bгибрид\b|\bhybrid\b/i, value: "гибрид" },
-    { pattern: /\bэлектро\b|\belectric\b/i, value: "электро" },
-    { pattern: /\bгаз\b|\blpg\b|\bпропан\b/i, value: "газ" },
-  ]
-
-  for (const { pattern, value } of fuelPatterns) {
-    if (pattern.test(text)) {
-      parts.push(value)
-      break
+    if (html.includes('captcha') || $('title').text().includes('403')) {
+      throw new Error('Blocked by Drom');
     }
-  }
 
-  const turboMatch = text.match(/\bтурбо\b|\bturbo\b/i)
-  if (turboMatch) {
-    parts.push("турбо")
-  }
+    const priceText = $('[data-name="price"]').text().trim() ||
+                      $('.b-price').text().trim();
+    const price = parseInt(priceText.replace(/\D/g, '')) || null;
 
-  return parts.length > 0 ? parts.join(", ") : null
+    const title = $('h1').text().trim() || $('.b-title').text().trim();
+    const description = $('.b-pageBlock_content').text().trim() ||
+                        $('.description').text().trim();
+
+    const params = extractParams($);
+    const year = params['Год выпуска'] ? parseInt(params['Год выпуска']) : null;
+    const mileage = params['Пробег'] ? parseInt(params['Пробег'].replace(/\D/g, '')) : null;
+    const photos = extractPhotos($);
+    const seller = $('.b-seller-name').text().trim() || 'Частное лицо';
+
+    return {
+      url, price, title, year, mileage,
+      description: `${title}\n\n${description}\n\n${Object.entries(params).map(([k, v]) => `${k}: ${v}`).join('\n')}`,
+      photos, seller, phone: null, source: 'drom',
+    };
+  } catch (error) {
+    console.error('Drom parse error:', error);
+    return null;
+  }
 }
 
-function parseTransmission(text: string): string | null {
-  for (const { pattern, value } of TRANSMISSION_KEYWORDS) {
-    if (pattern.test(text)) {
-      return value
-    }
-  }
+export async function fetchListing(url: string): Promise<ListingData | null> {
+  if (!url) return null;
 
-  return null
-}
+  try {
+    if (url.includes('avito.ru')) return await parseAvito(url);
+    if (url.includes('auto.ru')) return await parseAutoRu(url);
+    if (url.includes('drom.ru')) return await parseDrom(url);
 
-function parseBodyType(text: string): string | null {
-  for (const { pattern, value } of BODY_TYPE_KEYWORDS) {
-    if (pattern.test(text)) {
-      return value
-    }
-  }
-
-  return null
-}
-
-function parseColor(text: string): string | null {
-  const normalized = text.toLowerCase()
-
-  for (const color of COLOR_KEYWORDS) {
-    if (new RegExp(`\\b${escapeRegExp(color)}\\b`, "i").test(normalized)) {
-      return color.replace("ё", "е")
-    }
-  }
-
-  const colorLabelMatch = text.match(
-    /цвет[:\s]+([а-яёa-z-]+(?:\s+[а-яёa-z-]+)?)/i
-  )
-  if (colorLabelMatch?.[1]) {
-    return colorLabelMatch[1].trim().toLowerCase().replace("ё", "е")
-  }
-
-  return null
-}
-
-function parseOwners(text: string): number | null {
-  const patterns = [
-    /\b(\d)\s*\+\s*владел/i,
-    /\b(\d)\s*владел(?:ец|ца|ев|ьца)?\b/i,
-    /\bвладельц(?:ев|а)?[:\s]*(\d)\b/i,
-    /\b(\d)\s*х?\s*собственник/i,
-  ]
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern)
-    if (match?.[1]) {
-      return Number(match[1])
-    }
-  }
-
-  if (/\bпо\s+птс\b/i.test(text)) {
-    return null
-  }
-
-  return null
-}
-
-export function parseListing(text: string): ParsedListing {
-  const normalized = normalizeText(text.trim())
-
-  const { make, model } = parseMakeModel(normalized)
-
-  return {
-    make,
-    model,
-    year: parseYear(normalized),
-    mileage: parseMileage(normalized),
-    price: parsePrice(normalized),
-    engine: parseEngine(normalized),
-    transmission: parseTransmission(normalized),
-    bodyType: parseBodyType(normalized),
-    color: parseColor(normalized),
-    owners: parseOwners(normalized),
-    description: text,
+    return null;
+  } catch (error) {
+    console.error('Fetch listing error:', error);
+    return null;
   }
 }
